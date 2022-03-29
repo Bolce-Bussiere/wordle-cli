@@ -6,6 +6,12 @@
 #include "hashmap.h"
 #include "reader.h"
 
+const char *USAGE =
+    "Usage: %s [OPTIONS]\n"
+    "OPTIONS:\n"
+    "   --file {filename} : Use filename as dictionary, default is words.txt\n"
+    "   --length {n}      : Use words of length n\n";
+
 struct color
 {
     unsigned char fg, bg;
@@ -237,10 +243,11 @@ int main(int argc, char **argv)
                 return 1;
             }
         }
-//        else if (strcmp(argv[i], "--hard") == 0)
-//        {
-//            opts.hard_mode = 1;
-//        }
+        else if (strcmp(argv[i], "--help") == 0)
+        {
+            printf(USAGE, argv[0]);
+            return 0;
+        }
     }
     if (opts.word_file == NULL)
     {
