@@ -4,77 +4,7 @@
 #include <ctype.h>
 #include <time.h>
 #include "hashmap.h"
-
-int next_word(FILE *f)
-{
-    char c;
-    do
-    {
-        c = fgetc(f);
-    } while (!isspace(c) && c != EOF);
-    if (c == EOF)
-    {
-        return EOF;
-    }
-    do
-    {
-        c = fgetc(f);
-    } while (isspace(c));
-    if (c == EOF)
-    {
-        return EOF;
-    }
-    return ungetc(c, f);
-}
-
-struct map *get_words(FILE *f, unsigned word_len, int (*filter)(int))
-{
-    struct map *word_list = map_new(10000);
-    char *current_word = malloc((word_len + 1) * sizeof(char));
-    char c;
-    while (1)
-    {
-restart:
-        for (unsigned i = 0; i < word_len; ++i)
-        {
-            c = fgetc(f);
-            if (isspace(c) || !filter(c))
-            {
-                ungetc(c, f);
-                if (next_word(f) == EOF)
-                {
-                    // break while loop
-                    goto done;
-                }
-                goto restart;
-            }
-            current_word[i] = c;
-        }
-        c = fgetc(f);
-        if (c == EOF)
-        {
-            goto done;
-        } else if (!isspace(c))
-        {
-            if (next_word(f) == EOF)
-            {
-                goto done;
-            }
-        } else
-        {
-            current_word[word_len] = '\0';
-            ++*map_value_ptr(word_list, current_word, 0);
-            ungetc(c, f);
-            if (next_word(f) == EOF)
-            {
-                goto done;
-            }
-        }
-    }
-done:
-    free(current_word);
-    return word_list;
-}
+#include "reader.h"
 
 struct color
 {
@@ -157,6 +87,21 @@ struct options
     int hard_mode;
 };
 
+void add_word(struct map *words, char *word)
+{
+    for (int i = 0; word[i]; ++i)
+    {
+        word[i] = tolower(word[i]);
+    }
+    ++*map_value_ptr(words, word, 0);
+}
+
+// don't include words with apostrophes or numbers
+int invalid(int c)
+{
+    return c == '\'' || (c >= '0' && c <= '9');
+}
+
 int wordle(struct options opts)
 {
     struct color key_colors[26];
@@ -165,12 +110,13 @@ int wordle(struct options opts)
         key_colors[i].fg = 0;
         key_colors[i].bg = 255;
     }
-    struct map *words = get_words(opts.word_file, opts.word_length, isalpha);
+    struct map *words = map_new(10000);
     if (!words)
     {
         return 1;
     }
-    else if (words->elems == 0)
+    get_words(opts.word_file, opts.word_length, isalpha, invalid, words, add_word);
+    if (words->elems == 0)
     {
         printf("No words in file matched criteria!\n");
         return 1;
