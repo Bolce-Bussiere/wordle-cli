@@ -10,11 +10,26 @@ const char *USAGE =
     "Usage: %s [OPTIONS]\n"
     "OPTIONS:\n"
     "   --file {filename} : Use filename as dictionary, default is words.txt\n"
-    "   --length {n}      : Use words of length n\n";
+    "   --length {n}      : Use words of length n\n"
+    "   --guesses {n}     : Maximum number of allowed guesses. 0 for unlimited\n";
 
-struct color
+struct palette
 {
     unsigned char fg, bg;
+};
+
+enum color {
+    WHITE = 0,
+    BLACK,
+    YELLOW,
+    GREEN
+};
+
+struct palette THEME[] = {
+    [WHITE]  = { .fg =   0, .bg = 255 },
+    [YELLOW] = { .fg =   0, .bg = 220 },
+    [GREEN]  = { .fg =   0, .bg =  82 },
+    [BLACK]  = { .fg = 255, .bg =   0 }
 };
 
 const char *KEYBOARD[] =
@@ -24,16 +39,16 @@ const char *KEYBOARD[] =
       "zxcvbnm"
 };
 
-void set_color(struct color c) {
-    printf("\x1b[38;5;%um\x1b[48;5;%um", c.fg, c.bg);
+void set_color(enum color c) {
+    printf("\x1b[38;5;%um\x1b[48;5;%um", THEME[c].fg, THEME[c].bg);
 }
 
-void print_keys(struct color key_colors[26])
+void print_keys(enum color key_colors[26], unsigned line)
 {
-    printf("\x1b[3;0H"); // cursor to line 3
+    printf("\x1b[%u;0H", line); // cursor to line
     for (int i = 0; i < 3; ++i)
     {
-        printf("      ");
+        printf("  ");
         for (int j = 0; j < i; ++j)
         {
             printf(" ");
@@ -47,15 +62,19 @@ void print_keys(struct color key_colors[26])
     }
 }
 
-void get_colors(struct color *colors, const char *s1, const char *s2, unsigned len)
+void get_colors(enum color *colors, const char *s1, const char *s2, unsigned len)
 {
-    static unsigned set[256] = {0};
+    static unsigned set[256];
+    for (unsigned i = 0; i < len; ++i)
+    {
+        set[(unsigned char) s2[i]] = 0;
+        set[(unsigned char) s1[i]] = 0;
+    }
     for (unsigned i = 0; i < len; ++i)
     {
         if (s2[i] == s1[i])
         {
-            colors[i].fg = 0;
-            colors[i].bg = 82;
+            colors[i] = GREEN;
         }
         else
         {
@@ -68,20 +87,14 @@ void get_colors(struct color *colors, const char *s1, const char *s2, unsigned l
         {
             if (set[(unsigned char) s1[i]] > 0)
             {
-                colors[i].fg = 0;
-                colors[i].bg = 220;
+                colors[i] = YELLOW;
                 --set[(unsigned char) s1[i]];
             }
             else
             {
-                colors[i].fg = 255;
-                colors[i].bg = 0;
+                colors[i] = BLACK;
             }
         }
-    }
-    for (unsigned i = 0; i < len; ++i)
-    {
-        set[(unsigned char) s2[i]] = 0;
     }
 }
 
@@ -90,6 +103,7 @@ struct options
 {
     FILE *word_file;
     unsigned word_length;
+    unsigned guesses;
     int hard_mode;
 };
 
@@ -110,11 +124,10 @@ int invalid(int c)
 
 int wordle(struct options opts)
 {
-    struct color key_colors[26];
+    enum color key_colors[26];
     for (int i = 0; i < 26; ++i)
     {
-        key_colors[i].fg = 0;
-        key_colors[i].bg = 255;
+        key_colors[i] = WHITE;
     }
     struct map *words = map_new(10000);
     if (!words)
@@ -133,14 +146,20 @@ int wordle(struct options opts)
     size_t guess_buff_size = 2 * (opts.word_length + 1);
     char *guess = malloc(guess_buff_size * sizeof(char));
     ssize_t guess_len;
-    struct color *colors = malloc(opts.word_length * sizeof(struct color));
+    enum color *colors = malloc(opts.word_length * sizeof(enum color));
     
-    int done = 0, guesses = 0;
+    int correct = 0, guesses = 0;
     printf("\x1b[H\x1b[2J"); // Move cursor to 0, 0 and clear screen
-    printf("\x1b[1m\tWORDLE\x1b[22m\n"); // bold
-    print_keys(key_colors);
-    printf("Guess a %d letter word:\n", opts.word_length);
-    while (!done)
+    printf("\x1b[1m    WORDLE\x1b[22m\n"); // bold
+    print_keys(key_colors, 3);
+    for (int i = 0; i < opts.guesses; ++i) {
+        printf("\n");
+        for (int j = 0; j < opts.word_length; ++j) {
+            printf("_"); // haha emoji face
+        }
+    }
+    printf("\x1b[7;0H");
+    while (!correct && (opts.guesses == 0 || guesses < opts.guesses))
     {
         guess_len = getline(&guess, &guess_buff_size, stdin);
         if (guess_len < 0)
@@ -151,32 +170,46 @@ int wordle(struct options opts)
         guess[--guess_len] = '\0'; // remove newline
         if (map_has(words, guess) && guess_len == opts.word_length)
         {
-            done = 1;
+            ++guesses;
+            correct = 1;
             printf("\x1b[1F"); // Cursor to begining of previous line
-            printf("\x1b[0J"); // Clear from cursor to end of screen (clear errors)
+            if (opts.guesses != 0)
+            {
+                printf("\x1b[%u;0H", opts.guesses + 7);
+                printf("\x1b[2K");
+                printf("\x1b[%u;0H", guesses + 6);
+            }
+            else
+            {
+                printf("\x1b[0J");
+            }
             get_colors(colors, guess, secret, opts.word_length);
             for (unsigned i = 0; i < opts.word_length; ++i)
             {
                 set_color(colors[i]);
                 printf("%c", guess[i]);
-                if (colors[i].bg != 82)
+                if (colors[i] != GREEN)
                 {
-                    done = 0;
+                    correct = 0;
                 }
-                if (key_colors[guess[i] - 'a'].bg != 82)
+                if (key_colors[guess[i] - 'a'] < colors[i])
                 {
                     key_colors[guess[i] - 'a'] = colors[i];
                 }
             }
-            ++guesses;
             printf("\x1b[39;49m"); // reset text color
             printf("\x1b[s"); // save cursor position
-            print_keys(key_colors);
+            print_keys(key_colors, 3); // TODO: change this towards 0 as
+                                       // no. guesses approches lines in term
             printf("\x1b[u"); // restore cursor position
             printf("\n");
         }
         else
         {
+            if (opts.guesses != 0)
+            {
+                printf("\x1b[%u;0H", opts.guesses + 7);
+            }
             // Clear line
             printf("\x1b[2K\r");
             if (guess_len < opts.word_length)
@@ -192,12 +225,26 @@ int wordle(struct options opts)
                 printf("Not a valid word!");
             }
             // Reset cursor to before input
-            printf("\x1b[1A");
+            printf("\x1b[%u;0H", guesses + 7);
             // Clear line
             printf("\x1b[2K\r");
+            // Print spaces
+            for (int i = 0; i < opts.word_length; ++i) {
+                printf("_");
+            }
+            printf("\r");
+            fflush(stdout);
         }
     }
-    printf("Nice job! You got it in %d guesses!\n", guesses);
+    if (correct)
+    {
+        printf("Nice job! You got it in %d guesses!\n", guesses);
+    }
+    else
+    {
+        printf("So close! The word was %s.\n", secret);
+    }
+    printf("\x1b[0J");
     map_free(words);
     return 0;
 }
@@ -207,6 +254,7 @@ int main(int argc, char **argv)
     struct options opts = {
         .word_file = NULL,
         .word_length = 5,
+        .guesses = 6,
         .hard_mode = 0
     };
     for (int i = 1; i < argc; ++i)
@@ -240,6 +288,21 @@ int main(int argc, char **argv)
             if (!opts.word_file)
             {
                 printf("Error: could not open file for reading: %s\n", argv[i]);
+                return 1;
+            }
+        }
+        else if (strcmp(argv[i], "--guesses") == 0) {
+            ++i;
+            if (i >= argc) {
+                printf("Error: option '--guesses' needs an argument");
+                return 1;
+            }
+            char *endptr;
+            opts.guesses = strtol(argv[i], &endptr, 10);
+            if (*endptr != '\0')
+            {
+                printf("Error: option '--guesses' expected an integer argument,"
+                       " instead got '%s'\n", argv[i]);
                 return 1;
             }
         }
