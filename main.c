@@ -3,6 +3,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <time.h>
+#include <signal.h>
 #include "hashmap.h"
 #include "reader.h"
 
@@ -98,15 +99,7 @@ void get_colors(enum color *colors, const char *s1, const char *s2, unsigned len
     }
 }
 
-// Command-line options
-struct options
-{
-    FILE *word_file;
-    unsigned word_length;
-    unsigned guesses;
-    int hard_mode;
-};
-
+// for reading dict file
 void add_word(struct map *words, char *word)
 {
     for (int i = 0; word[i]; ++i)
@@ -120,6 +113,29 @@ void add_word(struct map *words, char *word)
 int invalid(int c)
 {
     return c == '\'' || (c >= '0' && c <= '9');
+}
+
+// Command-line options
+struct options
+{
+    FILE *word_file;
+    unsigned word_length;
+    unsigned guesses;
+    int hard_mode;
+};
+
+// scary global variable so we can print secret word in signal handler
+char *secret_GLOBAL;
+
+// Handle Ctrl-C : Print the secret word and exit
+void kb_interrupt_handler(int signum)
+{
+    // I don't want to add more global state, so assume we recived
+    // Ctrl-C while waiting for user input
+    printf("\x1b[1E"); // Go down 1 line
+    printf("\x1b[0J"); // Clear to end of screen
+    printf("The secret word was %s.\n", secret_GLOBAL);
+    exit(signum);
 }
 
 int wordle(struct options opts)
@@ -141,6 +157,9 @@ int wordle(struct options opts)
         return 1;
     }
     char *secret = map_random_key(words);
+    secret_GLOBAL = secret;
+    // Now that we have a secret word set it is safe to set our interrupt handler
+    signal(SIGINT, kb_interrupt_handler);
     
     // Make the guess buffer a bit longer than neccessary to avoid reallocs
     size_t guess_buff_size = 2 * (opts.word_length + 1);
